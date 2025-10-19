@@ -105,13 +105,13 @@ class SessionScheduler(commands.Cog, name="Session Scheduler"):
                     return await response.json()
         return []
 
-    @commands.command(name="setlogs")
+    @commands.command(name="setlogs", help="Set the log channel for session scheduling. Usage: ?setlogs #channel")
     @commands.has_permissions(administrator=True)
     async def setlogs(self, ctx, channel: discord.TextChannel):
         self.log_channels[ctx.guild.id] = channel.id
         await ctx.send(f"Log channel set to {channel.mention}")
 
-    @commands.command(name="schedulesession")
+    @commands.command(name="schedulesession", help="Schedule a session. Usage: ?schedulesession [shift/training/largeshift]")
     async def schedulesession(self, ctx, session_type: str):
         session_types = {
             "shift": "Shift",
