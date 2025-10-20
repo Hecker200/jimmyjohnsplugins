@@ -4,7 +4,6 @@ from discord import app_commands
 import aiohttp
 import json
 from datetime import datetime
-import pytz
 
 class SessionScheduler(commands.Cog, name="Session Scheduler"):
     def __init__(self, bot):
@@ -34,7 +33,7 @@ class SessionScheduler(commands.Cog, name="Session Scheduler"):
             print(f"Error fetching Roblox user ID: {e}")
             return None, None
 
-    async def create_trello_card(self, name, desc, label_name):
+    async def create_trello_card(self, name, desc, label_name, due_date=None):
         url = "https://api.trello.com/1/cards"
         query = {
             'key': self.trello_key,
@@ -43,6 +42,9 @@ class SessionScheduler(commands.Cog, name="Session Scheduler"):
             'name': name,
             'desc': desc
         }
+
+        if due_date:
+            query['due'] = due_date
 
         async with aiohttp.ClientSession() as session:
             async with session.post(url, params=query) as response:
@@ -128,8 +130,8 @@ class SessionScheduler(commands.Cog, name="Session Scheduler"):
             host_username = discord.ui.TextInput(label="Host Roblox Username", required=True)
             cohost_username = discord.ui.TextInput(label="Cohost Roblox Username", required=False)
             description = discord.ui.TextInput(label="Description", style=discord.TextStyle.paragraph, required=True)
-            date = discord.ui.TextInput(label="Date (MM/DD/YYYY)", required=True)
-            time = discord.ui.TextInput(label="Time (24hr format HH:MM)", required=True)
+            date = discord.ui.TextInput(label="Date (MM/DD/YYYY)", required=True, placeholder="10/20/2025")
+            time = discord.ui.TextInput(label="Time (12hr format HH:MM AM/PM GMT)", required=True, placeholder="8:00 PM")
 
             def __init__(self, cog, session_title):
                 super().__init__()
@@ -143,31 +145,39 @@ class SessionScheduler(commands.Cog, name="Session Scheduler"):
                     return
 
                 cohost_text = ""
+                cohost_name = None
                 if str(self.cohost_username):
                     cohost_id, cohost_name = await self.cog.get_roblox_user_id(str(self.cohost_username))
                     if cohost_name:
                         cohost_text = f"\nCohost: {cohost_name}"
 
                 try:
-                    datetime.strptime(str(self.date), "%m/%d/%Y")
-                    datetime.strptime(str(self.time), "%H:%M")
-                except ValueError:
-                    await interaction.response.send_message("Invalid date or time format. Use MM/DD/YYYY for date and HH:MM for time.", ephemeral=True)
+                    date_obj = datetime.strptime(str(self.date), "%m/%d/%Y")
+                    time_obj = datetime.strptime(str(self.time).strip().upper(), "%I:%M %p")
+                    
+                    combined_datetime = datetime.combine(date_obj.date(), time_obj.time())
+                    gmt = pytz.timezone('GMT')
+                    gmt_datetime = gmt.localize(combined_datetime)
+                    
+                    iso_date = gmt_datetime.isoformat()
+                    
+                except ValueError as e:
+                    await interaction.response.send_message("Invalid date or time format. Use MM/DD/YYYY for date and HH:MM AM/PM for time (e.g., 8:00 PM).", ephemeral=True)
                     return
 
-                card_desc = f"Host: {host_name}{cohost_text}\nDescription: {self.description}\nDate: {self.date}\nTime: {self.time}"
+                card_desc = f"Host: {host_name}{cohost_text}\nDescription: {self.description}\nDate: {self.date}\nTime: {self.time} GMT"
 
-                card_id = await self.cog.create_trello_card(self.session_title, card_desc, "Scheduled")
+                card_id = await self.cog.create_trello_card(self.session_title, card_desc, "Scheduled", iso_date)
 
                 if card_id:
-                    await interaction.response.send_message(f"Session scheduled successfully! Card created on Trello.", ephemeral=True)
+                    await interaction.response.send_message(f"Session scheduled successfully! Card created on Trello with due date.", ephemeral=True)
 
                     if interaction.guild.id in self.cog.log_channels:
                         log_channel = interaction.guild.get_channel(self.cog.log_channels[interaction.guild.id])
                         if log_channel:
                             embed = discord.Embed(
                                 title="Session Scheduled",
-                                description=f"**Type:** {self.session_title}\n**Host:** {host_name}\n**Cohost:** {cohost_name if cohost_text else 'None'}\n**Date:** {self.date}\n**Time:** {self.time}\n**Description:** {self.description}",
+                                description=f"**Type:** {self.session_title}\n**Host:** {host_name}\n**Cohost:** {cohost_name if cohost_text else 'None'}\n**Date:** {self.date}\n**Time:** {self.time} GMT\n**Description:** {self.description}",
                                 color=discord.Color.green()
                             )
                             embed.set_footer(text=f"Scheduled by {interaction.user}")
