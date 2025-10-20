@@ -4,6 +4,7 @@ from discord import app_commands
 import aiohttp
 import json
 from datetime import datetime
+import pytz
 
 class SessionScheduler(commands.Cog, name="Session Scheduler"):
     def __init__(self, bot):
@@ -147,7 +148,14 @@ class SessionScheduler(commands.Cog, name="Session Scheduler"):
                     if cohost_name:
                         cohost_text = f"\nCohost: {cohost_name}"
 
-                card_desc = f"Host: {host_name}{cohost_text}\nDescription: {self.description}"
+                try:
+                    datetime.strptime(str(self.date), "%m/%d/%Y")
+                    datetime.strptime(str(self.time), "%H:%M")
+                except ValueError:
+                    await interaction.response.send_message("Invalid date or time format. Use MM/DD/YYYY for date and HH:MM for time.", ephemeral=True)
+                    return
+
+                card_desc = f"Host: {host_name}{cohost_text}\nDescription: {self.description}\nDate: {self.date}\nTime: {self.time}"
 
                 card_id = await self.cog.create_trello_card(self.session_title, card_desc, "Scheduled")
 
@@ -168,21 +176,28 @@ class SessionScheduler(commands.Cog, name="Session Scheduler"):
                     await interaction.response.send_message("Failed to create Trello card.", ephemeral=True)
 
         modal = SessionModal(self, session_types[session_type.lower()])
-        await ctx.send("Opening session scheduler...", delete_after=2)
         
         class ModalView(discord.ui.View):
-            def __init__(self, modal_instance):
+            def __init__(self, modal_instance, author):
                 super().__init__(timeout=180)
                 self.modal_instance = modal_instance
+                self.author = author
+                self.message = None
 
             @discord.ui.button(label="Schedule Session", style=discord.ButtonStyle.primary)
             async def schedule_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if interaction.user.id != self.author.id:
+                    await interaction.response.send_message("This button is not for you!", ephemeral=True)
+                    return
                 await interaction.response.send_modal(self.modal_instance)
+                if self.message:
+                    await self.message.delete()
 
-        view = ModalView(modal)
-        await ctx.send("Click the button to open the session scheduler:", view=view)
+        view = ModalView(modal, ctx.author)
+        message = await ctx.send("Click the button to open the session scheduler:", view=view)
+        view.message = message
 
-    @commands.command(name="cancelsession")
+    @commands.command(name="cancelsession", help="Cancel a scheduled session. Usage: ?cancelsession [session name]")
     async def cancelsession(self, ctx, *, session_name: str):
         cards = await self.get_all_cards()
         
